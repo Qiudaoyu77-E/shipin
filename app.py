@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""本地网页：上传单张或多张图片，输出人体结构姿势图。"""
 """本地网页：上传单张或多张图片，输出骨架姿势图。"""
 
 from __future__ import annotations
@@ -85,6 +86,8 @@ def run_batch(
     return out_paths
 
 
+with gr.Blocks(title="照片转绘画人体结构/姿势图") as demo:
+    gr.Markdown("# 照片转绘画人体结构/姿势图\n支持单张和批量处理（本地网页运行）")
 with gr.Blocks(title="照片转绘画骨架/姿势图") as demo:
     gr.Markdown("# 照片转绘画骨架/姿势图\n支持单张和批量处理（本地网页运行）")
 
@@ -96,6 +99,8 @@ with gr.Blocks(title="照片转绘画骨架/姿势图") as demo:
 
     with gr.Tab("单张图片"):
         in_img = gr.Image(type="numpy", label="上传照片")
+        out_img = gr.Image(type="numpy", label="结构结果")
+        btn_single = gr.Button("生成人体结构图")
         out_img = gr.Image(type="numpy", label="骨架结果")
         btn_single = gr.Button("生成骨架图")
         btn_single.click(
