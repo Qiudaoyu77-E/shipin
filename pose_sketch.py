@@ -118,6 +118,9 @@ def mp_pose_to_coco17(image_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray] | 
     return xy, conf
 
 
+    return parser.parse_args()
+
+
 def iter_images(folder: Path) -> Iterable[Path]:
     for p in sorted(folder.iterdir()):
         if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES:
@@ -290,6 +293,24 @@ def draw_pose_canvas(
             if valid(person_conf, idx):
                 cv2.circle(canvas, to_i(pt), max(1, point_radius - 1), (130, 130, 130), -1, cv2.LINE_AA)
 
+    for person_xy, person_conf in zip(keypoints_xy, keypoints_conf):
+        for i, j in COCO_EDGES:
+            if person_conf[i] >= kpt_conf_thres and person_conf[j] >= kpt_conf_thres:
+                p1 = tuple(person_xy[i].astype(int))
+                p2 = tuple(person_xy[j].astype(int))
+                cv2.line(canvas, p1, p2, (0, 0, 0), line_thickness, cv2.LINE_AA)
+
+        for idx, pt in enumerate(person_xy):
+            if person_conf[idx] >= kpt_conf_thres:
+                cv2.circle(
+                    canvas,
+                    tuple(pt.astype(int)),
+                    point_radius,
+                    (0, 0, 255),
+                    -1,
+                    cv2.LINE_AA,
+                )
+
     return canvas
 
 
@@ -324,6 +345,18 @@ def extract_pose_image(
 
     if keypoints_xy is None or keypoints_conf is None:
         return np.full_like(image, 255)
+
+) -> np.ndarray:
+    """输入BGR图像，返回骨架图(BGR)。"""
+    result = model.predict(source=image, conf=conf, verbose=False)[0]
+    if result.keypoints is None or result.keypoints.xy is None:
+        return np.full_like(image, 255)
+
+    keypoints_xy = result.keypoints.xy.cpu().numpy()
+    if result.keypoints.conf is None:
+        keypoints_conf = np.ones(keypoints_xy.shape[:2], dtype=np.float32)
+    else:
+        keypoints_conf = result.keypoints.conf.cpu().numpy()
 
     return draw_pose_canvas(
         image=image,
