@@ -235,6 +235,24 @@ def draw_pose_canvas(
             if valid(person_conf, idx):
                 cv2.circle(canvas, to_i(pt), max(1, point_radius - 1), (130, 130, 130), -1, cv2.LINE_AA)
 
+    for person_xy, person_conf in zip(keypoints_xy, keypoints_conf):
+        for i, j in COCO_EDGES:
+            if person_conf[i] >= kpt_conf_thres and person_conf[j] >= kpt_conf_thres:
+                p1 = tuple(person_xy[i].astype(int))
+                p2 = tuple(person_xy[j].astype(int))
+                cv2.line(canvas, p1, p2, (0, 0, 0), line_thickness, cv2.LINE_AA)
+
+        for idx, pt in enumerate(person_xy):
+            if person_conf[idx] >= kpt_conf_thres:
+                cv2.circle(
+                    canvas,
+                    tuple(pt.astype(int)),
+                    point_radius,
+                    (0, 0, 255),
+                    -1,
+                    cv2.LINE_AA,
+                )
+
     return canvas
 
 
