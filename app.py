@@ -33,6 +33,7 @@ def run_single(
     kpt_conf: float,
     line_thickness: int,
     point_radius: int,
+    use_mp_fallback: bool,
 ) -> np.ndarray:
     if image is None:
         raise gr.Error("请先上传图片")
@@ -45,6 +46,7 @@ def run_single(
         kpt_conf=kpt_conf,
         line_thickness=line_thickness,
         point_radius=point_radius,
+        use_mp_fallback=use_mp_fallback,
     )
     return _to_rgb(out_bgr)
 
@@ -55,6 +57,7 @@ def run_batch(
     kpt_conf: float,
     line_thickness: int,
     point_radius: int,
+    use_mp_fallback: bool,
 ):
     if not files:
         raise gr.Error("请先上传至少一张图片")
@@ -75,6 +78,7 @@ def run_batch(
             kpt_conf=kpt_conf,
             line_thickness=line_thickness,
             point_radius=point_radius,
+            use_mp_fallback=use_mp_fallback,
         )
         out_file = out_dir / f"{src.stem}_pose.png"
         cv2.imwrite(str(out_file), out_bgr)
@@ -96,11 +100,15 @@ with gr.Blocks(title="照片转绘画骨架/姿势图") as demo:
         kpt_conf = gr.Slider(0.05, 0.95, value=0.4, step=0.05, label="关键点阈值")
         line_thickness = gr.Slider(1, 10, value=3, step=1, label="线条粗细")
         point_radius = gr.Slider(1, 12, value=4, step=1, label="关键点大小")
+    use_mp_fallback = gr.Checkbox(value=True, label="开启半身场景增强（MediaPipe 回退）")
 
     with gr.Tab("单张图片"):
         in_img = gr.Image(type="numpy", label="上传照片")
         out_img = gr.Image(type="numpy", label="结构结果")
         btn_single = gr.Button("生成人体结构图")
+        btn_single.click(
+            fn=run_single,
+            inputs=[in_img, conf, kpt_conf, line_thickness, point_radius, use_mp_fallback],
         out_img = gr.Image(type="numpy", label="骨架结果")
         btn_single = gr.Button("生成骨架图")
         btn_single.click(
@@ -115,6 +123,7 @@ with gr.Blocks(title="照片转绘画骨架/姿势图") as demo:
         btn_batch = gr.Button("批量生成")
         btn_batch.click(
             fn=run_batch,
+            inputs=[in_files, conf, kpt_conf, line_thickness, point_radius, use_mp_fallback],
             inputs=[in_files, conf, kpt_conf, line_thickness, point_radius],
             outputs=out_files,
         )

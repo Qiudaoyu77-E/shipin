@@ -10,6 +10,10 @@ from typing import Iterable, Sequence
 import cv2
 import numpy as np
 from ultralytics import YOLO
+try:
+    import mediapipe as mp
+except Exception:  # noqa: BLE001
+    mp = None
 
 # YOLOv8-pose COCO 17 keypoints连接关系
 COCO_EDGES: Sequence[tuple[int, int]] = (
@@ -60,6 +64,60 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="启用批量处理：--input/--output 都应为目录",
     )
+    parser.add_argument(
+        "--no-mp-fallback",
+        action="store_true",
+        help="关闭 MediaPipe 回退（默认开启，用于半身/遮挡场景）",
+    )
+    return parser.parse_args()
+
+
+def mp_pose_to_coco17(image_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """使用 MediaPipe Pose 估算关键点并映射为 COCO17。"""
+    if mp is None:
+        return None, None
+
+    mapping = {
+        0: 0,   # nose
+        5: 11,  # left_shoulder
+        6: 12,  # right_shoulder
+        7: 13,  # left_elbow
+        8: 14,  # right_elbow
+        9: 15,  # left_wrist
+        10: 16, # right_wrist
+        11: 23, # left_hip
+        12: 24, # right_hip
+        13: 25, # left_knee
+        14: 26, # right_knee
+        15: 27, # left_ankle
+        16: 28, # right_ankle
+        1: 2,   # left_eye
+        2: 5,   # right_eye
+        3: 7,   # left_ear
+        4: 8,   # right_ear
+    }
+
+    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    with mp.solutions.pose.Pose(
+        static_image_mode=True, model_complexity=2, enable_segmentation=False
+    ) as pose:
+        res = pose.process(rgb)
+    if res.pose_landmarks is None:
+        return None, None
+
+    h, w = image_bgr.shape[:2]
+    xy = np.zeros((1, 17, 2), dtype=np.float32)
+    conf = np.zeros((1, 17), dtype=np.float32)
+
+    lm = res.pose_landmarks.landmark
+    for coco_idx, mp_idx in mapping.items():
+        p = lm[mp_idx]
+        xy[0, coco_idx] = np.array([p.x * w, p.y * h], dtype=np.float32)
+        conf[0, coco_idx] = float(p.visibility)
+
+    return xy, conf
+
+
     return parser.parse_args()
 
 
@@ -263,6 +321,31 @@ def extract_pose_image(
     kpt_conf: float = 0.4,
     line_thickness: int = 3,
     point_radius: int = 4,
+    use_mp_fallback: bool = True,
+) -> np.ndarray:
+    """输入BGR图像，返回骨架图(BGR)。"""
+    result = model.predict(source=image, conf=conf, verbose=False)[0]
+    keypoints_xy = None
+    keypoints_conf = None
+    if result.keypoints is not None and result.keypoints.xy is not None:
+        keypoints_xy = result.keypoints.xy.cpu().numpy()
+        if result.keypoints.conf is None:
+            keypoints_conf = np.ones(keypoints_xy.shape[:2], dtype=np.float32)
+        else:
+            keypoints_conf = result.keypoints.conf.cpu().numpy()
+
+    # 半身/遮挡图时 YOLO keypoints 可能太少：回退到 MediaPipe
+    visible_points = 0
+    if keypoints_conf is not None:
+        visible_points = int((keypoints_conf[0] >= kpt_conf).sum())
+    if (keypoints_xy is None or visible_points < 6) and use_mp_fallback:
+        mp_xy, mp_conf = mp_pose_to_coco17(image)
+        if mp_xy is not None:
+            keypoints_xy, keypoints_conf = mp_xy, mp_conf
+
+    if keypoints_xy is None or keypoints_conf is None:
+        return np.full_like(image, 255)
+
 ) -> np.ndarray:
     """输入BGR图像，返回骨架图(BGR)。"""
     result = model.predict(source=image, conf=conf, verbose=False)[0]
@@ -293,6 +376,7 @@ def process_one(
     kpt_conf: float,
     line_thickness: int,
     point_radius: int,
+    use_mp_fallback: bool,
 ) -> None:
     image = cv2.imread(str(input_path))
     if image is None:
@@ -305,6 +389,7 @@ def process_one(
         kpt_conf=kpt_conf,
         line_thickness=line_thickness,
         point_radius=point_radius,
+        use_mp_fallback=use_mp_fallback,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -338,6 +423,7 @@ def main() -> None:
                 kpt_conf=args.kpt_conf,
                 line_thickness=args.line_thickness,
                 point_radius=args.point_radius,
+                use_mp_fallback=not args.no_mp_fallback,
             )
             print(f"[OK] {img.name} -> {out}")
     else:
@@ -355,6 +441,7 @@ def main() -> None:
             kpt_conf=args.kpt_conf,
             line_thickness=args.line_thickness,
             point_radius=args.point_radius,
+            use_mp_fallback=not args.no_mp_fallback,
         )
         print(f"[OK] {input_path} -> {output_path}")
 
